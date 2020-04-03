@@ -1,0 +1,196 @@
+service: microservices-sagas
+
+plugins:
+  - serverless-step-functions
+  - serverless-pseudo-parameters
+  - serverless-prune-plugin
+
+custom:
+  region: ${opt:region, self:provider.region}
+  stage: ${opt:stage, self:provider.stage}
+  stack: ${self:service}-${self:custom.stage}
+  hotelBookingsTableName: ${self:custom.stack}-hotel-bookings
+  carBookingsTableName: ${self:custom.stack}-car-bookings
+  flightBookingsTableName: ${self:custom.stack}-flight-bookings
+  prune:
+    automatic: true
+    number: 1
+
+provider:
+  name: aws
+  runtime: python3.6
+  stage: devbryan
+  region: us-west-2
+  timeout: 300
+  memorySize: 128    
+  environment:
+    HOTEL_BOOKINGS_TABLE_NAME: ${self:custom.hotelBookingsTableName}
+    CAR_BOOKINGS_TABLE_NAME: ${self:custom.carBookingsTableName}
+    FLIGHT_BOOKINGS_TABLE_NAME: ${self:custom.flightBookingsTableName}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+      Resource:
+        - arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.hotelBookingsTableName}
+        - arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.carBookingsTableName}
+        - arn:aws:dynamodb:${self:custom.region}:*:table/${self:custom.flightBookingsTableName}
+
+functions:
+  bookHotel:
+    handler: src/book_hotel.handler
+
+  bookCar:
+    handler: src/book_car.handler
+
+  bookFlight:
+    handler: src/book_flight.handler
+
+  cancelHotel:
+    handler: src/cancel_hotel.handler
+
+  cancelCar:
+    handler: src/cancel_car.handler
+
+  cancelFlight:
+    handler: src/cancel_flight.handler
+
+stepFunctions:
+  stateMachines:
+    tripBookingSagas:
+      name: ${self:custom.stage}TripBookingSagas
+      definition:
+        Comment: A distributed saga example.
+        StartAt: BookTrip
+        States:
+          BookTrip:
+            Type: Parallel
+            Next: Trip Booking Successful
+            Branches:
+            - StartAt: BookHotel
+              States:
+                BookHotel:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [bookHotel, Arn]
+                  ResultPath: "$.BookHotelResult"
+                  End: true
+            - StartAt: BookFlight
+              States:
+                BookFlight:
+                  Type: Task
+                  Resource: 
+                    Fn::GetAtt: [bookFlight, Arn]
+                  ResultPath: "$.BookFlightResult"
+                  End: true
+            - StartAt: BookCar
+              States:
+                BookCar:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [bookCar, Arn]
+                  ResultPath: "$.BookCarResult"
+                  End: true
+            Catch:
+            - ErrorEquals:
+              - States.ALL
+              ResultPath: "$.BookTripError"
+              Next: Trip Booking Failed
+          Trip Booking Failed:
+            Type: Pass
+            Next: CancelTrip
+          CancelTrip:
+            Type: Parallel
+            Next: Trip Booking Cancelled
+            Branches:
+            - StartAt: CancelHotel
+              States:
+                CancelHotel:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [cancelHotel, Arn]
+                  Catch:
+                  - ErrorEquals:
+                    - States.ALL
+                    ResultPath: "$.CancelHotelError"
+                    Next: CancelHotel
+                  ResultPath: "$.CancelHotelResult"
+                  End: true
+            - StartAt: CancelFlight
+              States:
+                CancelFlight:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [cancelFlight, Arn]
+                  Catch:
+                  - ErrorEquals:
+                    - States.ALL
+                    ResultPath: "$.CancelFlightError"
+                    Next: CancelFlight
+                  ResultPath: "$.CancelFlightResult"
+                  End: true
+            - StartAt: CancelCar
+              States:
+                CancelCar:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [cancelCar, Arn]
+                  Catch:
+                  - ErrorEquals:
+                    - States.ALL
+                    ResultPath: "$.CancelCarError"
+                    Next: CancelCar
+                  ResultPath: "$.CancelCarResult"
+                  End: true
+          Trip Booking Successful:
+            Type: Succeed
+          Trip Booking Cancelled:
+            Type: Fail
+            Cause: Trip cancelled due to error.
+            Error: TripCancelledError
+
+resources:
+  Resources:
+    hotelBookingsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.hotelBookingsTableName}
+        AttributeDefinitions:
+          - AttributeName: tripId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tripId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+
+    carBookingsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.carBookingsTableName}
+        AttributeDefinitions:
+          - AttributeName: tripId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tripId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+
+    flightBookingsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.flightBookingsTableName}
+        AttributeDefinitions:
+          - AttributeName: tripId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tripId
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1

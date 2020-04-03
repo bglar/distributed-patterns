@@ -1,0 +1,13 @@
+{
+  "name": "microservices-sagas",
+  "version": "1.0.0",
+  "dependencies": {
+    "serverless": "^1.67.0",
+    "serverless-step-functions": "^2.17.1",
+    "serverless-prune-plugin": "1.3.2",
+    "serverless-pseudo-parameters": "2.4.0"
+  },
+  "devDependencies": {},
+  "author": "brian glar (bglar)",
+  "license": "MIT"
+}
